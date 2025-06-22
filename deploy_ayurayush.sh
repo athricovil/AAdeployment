@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # === AyurAyush End-to-End Deployment Script ===
-# Sets up backend (Spring Boot), frontend (Flutter Web), PostgreSQL, and NGINX
-# Now securely injects jwt.secret via systemd
+# Sets up Spring Boot backend, Flutter frontend, PostgreSQL, and NGINX
+# Securely injects jwt.secret and jwt.expirationMs via JVM -D options
 
 set -e
 
@@ -14,20 +14,35 @@ DB_NAME="ayurdb"
 DB_USER="ayuruser"
 DB_PASS="ayurpass"
 JWT_SECRET=$(openssl rand -base64 32)
+JWT_EXPIRATION_MS="86400000"  # 24 hours
 
-# --- Install Dependencies ---
+# --- [0/10] Stop and disable existing services ---
+echo "[0/10] Stopping existing aabackend and aafrontend services..."
+
+sudo systemctl stop aabackend.service 2>/dev/null || true
+sudo systemctl disable aabackend.service 2>/dev/null || true
+sudo rm -f /etc/systemd/system/aabackend.service
+
+sudo systemctl stop aafrontend.service 2>/dev/null || true
+sudo systemctl disable aafrontend.service 2>/dev/null || true
+sudo rm -f /etc/systemd/system/aafrontend.service
+
+sudo systemctl daemon-reexec
+sudo systemctl daemon-reload
+
+# --- [1/10] Install Dependencies ---
 echo "[1/10] Installing system dependencies..."
 sudo apt update && sudo apt upgrade -y
 sudo apt install -y openjdk-17-jdk maven git nginx postgresql postgresql-contrib unzip curl xz-utils libglu1-mesa
 
-# --- Set Up PostgreSQL ---
+# --- [2/10] Set Up PostgreSQL ---
 echo "[2/10] Setting up PostgreSQL..."
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'" | grep -q 1 || sudo -u postgres psql -c "CREATE DATABASE $DB_NAME;"
 sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname = '$DB_USER'" | grep -q 1 || sudo -u postgres psql -c "CREATE USER $DB_USER WITH ENCRYPTED PASSWORD '$DB_PASS';"
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE $DB_NAME TO $DB_USER;"
 
-# --- Enable PostgreSQL Remote Access ---
-echo "[3/10] Enabling PostgreSQL remote access..."
+# --- [3/10] Enable Remote Access for PostgreSQL ---
+echo "[3/10] Enabling remote access for PostgreSQL..."
 PG_CONF=$(find /etc/postgresql -name postgresql.conf)
 PG_HBA=$(find /etc/postgresql -name pg_hba.conf)
 sudo sed -i "s/^#*listen_addresses.*/listen_addresses = '*'/" "$PG_CONF"
@@ -35,28 +50,29 @@ MY_IP=$(curl -s ifconfig.me)
 echo "host    all             all             $MY_IP/32               md5" | sudo tee -a "$PG_HBA"
 sudo systemctl restart postgresql
 
-# --- Clone and Build Backend ---
-echo "[4/10] Cloning backend repo..."
+# --- [4/10] Clone and Build Backend ---
+echo "[4/10] Cloning and building Spring Boot backend..."
 cd $PROJECT_DIR
 [ -d "AAbackend" ] && rm -rf AAbackend
 git clone $SPRING_BACKEND_REPO AAbackend
 cd AAbackend/server
 
-# Inject DB config into Spring Boot
-echo "[5/10] Creating Spring Boot application.properties..."
+# Inject DB config and placeholder JWT properties
+echo "[5/10] Writing application.properties..."
 cat <<EOL > src/main/resources/application.properties
 spring.datasource.url=jdbc:postgresql://localhost:5432/$DB_NAME
 spring.datasource.username=$DB_USER
 spring.datasource.password=$DB_PASS
 spring.jpa.hibernate.ddl-auto=update
 server.port=8080
-jwt.secret=\${jwt.secret}  # <-- Resolved via systemd environment
+jwt.secret=\${jwt.secret}
+jwt.expirationMs=\${jwt.expirationMs}
 EOL
 
 mvn clean package -DskipTests -Dmaven.compiler.release=17
 
-# --- Create systemd service for backend with jwt.secret env ---
-echo "[6/10] Creating systemd service for backend..."
+# --- [6/10] Create systemd service for backend ---
+echo "[6/10] Creating systemd service for backend with -D injection..."
 cat <<EOL | sudo tee /etc/systemd/system/aabackend.service
 [Unit]
 Description=AyurAyush Spring Boot Backend
@@ -65,8 +81,10 @@ After=network.target
 [Service]
 User=root
 WorkingDirectory=$PROJECT_DIR/AAbackend/server
-Environment="jwt.secret=$JWT_SECRET"
-ExecStart=/usr/bin/java -jar $PROJECT_DIR/AAbackend/server/target/server-0.0.1-SNAPSHOT.jar
+ExecStart=/usr/bin/java \\
+  -Djwt.secret=$JWT_SECRET \\
+  -Djwt.expirationMs=$JWT_EXPIRATION_MS \\
+  -jar $PROJECT_DIR/AAbackend/server/target/server-0.0.1-SNAPSHOT.jar
 SuccessExitStatus=143
 Restart=always
 RestartSec=10
@@ -79,18 +97,17 @@ sudo systemctl daemon-reload
 sudo systemctl enable aabackend
 sudo systemctl restart aabackend
 
-# --- Install Flutter ---
-echo "[7/10] Installing Flutter..."
+# --- [7/10] Install Flutter ---
+echo "[7/10] Installing Flutter SDK..."
 cd $PROJECT_DIR
 [ -d "flutter" ] && rm -rf flutter
 git clone https://github.com/flutter/flutter.git -b stable
 export PATH="$PROJECT_DIR/flutter/bin:$PATH"
 echo 'export PATH="/root/flutter/bin:$PATH"' >> ~/.bashrc
-
 flutter doctor
 
-# --- Build Flutter Web App ---
-echo "[8/10] Cloning and building Flutter frontend..."
+# --- [8/10] Build Flutter Frontend ---
+echo "[8/10] Building Flutter web frontend..."
 cd $PROJECT_DIR
 [ -d "AAfrontend" ] && rm -rf AAfrontend
 git clone $FLUTTER_FRONTEND_REPO AAfrontend
@@ -98,14 +115,14 @@ cd AAfrontend/ayurayush_new
 flutter pub get
 flutter build web
 
-# --- Deploy to NGINX ---
-echo "[9/10] Deploying Flutter web app to NGINX..."
+# --- [9/10] Deploy Flutter Web to NGINX ---
+echo "[9/10] Deploying frontend to NGINX..."
 sudo rm -rf /var/www/html/*
 sudo cp -r build/web/* /var/www/html/
 sudo chown -R www-data:www-data /var/www/html/
 
-# --- Configure NGINX ---
-echo "[10/10] Configuring NGINX..."
+# --- [10/10] Configure NGINX ---
+echo "[10/10] Configuring NGINX reverse proxy..."
 cat <<EOL | sudo tee /etc/nginx/sites-available/default
 server {
     listen 80;
@@ -131,11 +148,11 @@ EOL
 
 sudo nginx -t && sudo systemctl restart nginx
 
-# --- Final Message ---
+# --- Final Status ---
 echo "✅ Deployment Complete!"
-echo "🌐 Visit your app at: http://$(curl -s ifconfig.me)"
-echo "🔐 JWT Secret was securely injected via systemd (not stored in source)"
-echo "🐘 DB: $DB_NAME | User: $DB_USER | Password: $DB_PASS"
-echo "📦 Backend Service: sudo systemctl status aabackend"
-echo "📌 Ensure port 5432 is open in Azure NSG for IP: $MY_IP"
+echo "🌐 Visit: http://$(curl -s ifconfig.me)"
+echo "🔐 JWT secret & expiration passed via JVM -D options"
+echo "🐘 PostgreSQL: $DB_NAME | User: $DB_USER | Pass: $DB_PASS"
+echo "📦 Backend: sudo systemctl status aabackend"
+echo "📌 Ensure Azure NSG allows port 5432 for IP: $MY_IP"
 
