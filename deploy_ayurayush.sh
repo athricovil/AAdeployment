@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # === AyurAyush End-to-End Deployment Script ===
-# This script sets up backend (Spring Boot), frontend (Flutter Web), PostgreSQL DB, and NGINX on Ubuntu
-# Assumes: clean Azure Ubuntu VM with internet access
+# Sets up backend (Spring Boot), frontend (Flutter Web), PostgreSQL, and NGINX
+# Now securely injects jwt.secret via systemd
 
 set -e
 
@@ -26,7 +26,7 @@ sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname = '$DB_NAME'"
 sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname = '$DB_USER'" | grep -q 1 || sudo -u postgres psql -c "CREATE USER $DB_USER WITH ENCRYPTED PASSWORD '$DB_PASS';"
 sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE $DB_NAME TO $DB_USER;"
 
-# --- Enable remote access to PostgreSQL ---
+# --- Enable PostgreSQL Remote Access ---
 echo "[3/10] Enabling PostgreSQL remote access..."
 PG_CONF=$(find /etc/postgresql -name postgresql.conf)
 PG_HBA=$(find /etc/postgresql -name pg_hba.conf)
@@ -43,19 +43,20 @@ git clone $SPRING_BACKEND_REPO AAbackend
 cd AAbackend/server
 
 # Inject DB config into Spring Boot
+echo "[5/10] Creating Spring Boot application.properties..."
 cat <<EOL > src/main/resources/application.properties
 spring.datasource.url=jdbc:postgresql://localhost:5432/$DB_NAME
 spring.datasource.username=$DB_USER
 spring.datasource.password=$DB_PASS
 spring.jpa.hibernate.ddl-auto=update
 server.port=8080
-jwt.secret=$JWT_SECRET
+jwt.secret=\${jwt.secret}  # <-- Resolved via systemd environment
 EOL
 
 mvn clean package -DskipTests -Dmaven.compiler.release=17
 
-# --- Create systemd service for backend ---
-echo "[5/10] Creating systemd service for backend..."
+# --- Create systemd service for backend with jwt.secret env ---
+echo "[6/10] Creating systemd service for backend..."
 cat <<EOL | sudo tee /etc/systemd/system/aabackend.service
 [Unit]
 Description=AyurAyush Spring Boot Backend
@@ -64,6 +65,7 @@ After=network.target
 [Service]
 User=root
 WorkingDirectory=$PROJECT_DIR/AAbackend/server
+Environment="jwt.secret=$JWT_SECRET"
 ExecStart=/usr/bin/java -jar $PROJECT_DIR/AAbackend/server/target/server-0.0.1-SNAPSHOT.jar
 SuccessExitStatus=143
 Restart=always
@@ -75,10 +77,10 @@ EOL
 
 sudo systemctl daemon-reload
 sudo systemctl enable aabackend
-sudo systemctl start aabackend
+sudo systemctl restart aabackend
 
 # --- Install Flutter ---
-echo "[6/10] Installing Flutter..."
+echo "[7/10] Installing Flutter..."
 cd $PROJECT_DIR
 [ -d "flutter" ] && rm -rf flutter
 git clone https://github.com/flutter/flutter.git -b stable
@@ -88,7 +90,7 @@ echo 'export PATH="/root/flutter/bin:$PATH"' >> ~/.bashrc
 flutter doctor
 
 # --- Build Flutter Web App ---
-echo "[7/10] Cloning and building Flutter frontend..."
+echo "[8/10] Cloning and building Flutter frontend..."
 cd $PROJECT_DIR
 [ -d "AAfrontend" ] && rm -rf AAfrontend
 git clone $FLUTTER_FRONTEND_REPO AAfrontend
@@ -97,13 +99,13 @@ flutter pub get
 flutter build web
 
 # --- Deploy to NGINX ---
-echo "[8/10] Deploying Flutter web app to NGINX..."
+echo "[9/10] Deploying Flutter web app to NGINX..."
 sudo rm -rf /var/www/html/*
 sudo cp -r build/web/* /var/www/html/
 sudo chown -R www-data:www-data /var/www/html/
 
 # --- Configure NGINX ---
-echo "[9/10] Configuring NGINX..."
+echo "[10/10] Configuring NGINX..."
 cat <<EOL | sudo tee /etc/nginx/sites-available/default
 server {
     listen 80;
@@ -130,11 +132,10 @@ EOL
 sudo nginx -t && sudo systemctl restart nginx
 
 # --- Final Message ---
-echo "[10/10] Deployment Complete!"
-echo "Visit your app at: http://$(curl -s ifconfig.me)"
-echo "Backend runs on port 8080 and is reverse proxied via NGINX"
-echo "Database: $DB_NAME | User: $DB_USER | Password: $DB_PASS"
-echo "JWT Secret: $JWT_SECRET"
-echo "Systemd backend service: sudo systemctl status aabackend"
-echo "Make sure port 5432 is open to $MY_IP in Azure NSG for pgAdmin access"
+echo "✅ Deployment Complete!"
+echo "🌐 Visit your app at: http://$(curl -s ifconfig.me)"
+echo "🔐 JWT Secret was securely injected via systemd (not stored in source)"
+echo "🐘 DB: $DB_NAME | User: $DB_USER | Password: $DB_PASS"
+echo "📦 Backend Service: sudo systemctl status aabackend"
+echo "📌 Ensure port 5432 is open in Azure NSG for IP: $MY_IP"
 
