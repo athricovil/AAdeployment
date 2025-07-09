@@ -88,7 +88,7 @@ ExecStart=/usr/bin/java \\
   -Djwt.secret=$JWT_SECRET \\
   -Djwt.expirationMs=$JWT_EXPIRATION_MS \\
   -Dcors.allowed-origin-patterns=$CORS_ALLOWED_ORIGIN_PATTERNS \\
-  -jar $PROJECT_DIR/AAbackend/server/target/server-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod
+  -jar $PROJECT_DIR/AAbackend/server/target/server-0.0.1-SNAPSHOT.jar
 SuccessExitStatus=143
 Restart=always
 RestartSec=10
