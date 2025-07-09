@@ -15,6 +15,8 @@ DB_USER="ayuruser"
 DB_PASS="ayurpass"
 JWT_SECRET=$(openssl rand -base64 32)
 JWT_EXPIRATION_MS="86400000"  # 24 hours
+CORS_ALLOWED_ORIGIN_PATTERNS= "http://localhost:*,http://104.211.241.125"
+
 
 # --- [0/10] Stop and disable existing services ---
 echo "[0/10] Stopping existing aabackend and aafrontend services..."
@@ -85,6 +87,7 @@ WorkingDirectory=$PROJECT_DIR/AAbackend/server
 ExecStart=/usr/bin/java \\
   -Djwt.secret=$JWT_SECRET \\
   -Djwt.expirationMs=$JWT_EXPIRATION_MS \\
+  -Dcors.allowed-origin-patterns=$CORS_ALLOWED_ORIGIN_PATTERNS \\
   -jar $PROJECT_DIR/AAbackend/server/target/server-0.0.1-SNAPSHOT.jar
 SuccessExitStatus=143
 Restart=always
