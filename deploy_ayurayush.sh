@@ -67,6 +67,7 @@ spring.jpa.hibernate.ddl-auto=update
 server.port=8080
 jwt.secret=\${jwt.secret}
 jwt.expirationMs=\${jwt.expirationMs}
+cors.allowed-origin-patterns=\${cors.allowed-origin-patterns}
 EOL
 
 mvn clean package -DskipTests -Dmaven.compiler.release=17
