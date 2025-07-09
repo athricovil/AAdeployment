@@ -15,7 +15,7 @@ DB_USER="ayuruser"
 DB_PASS="ayurpass"
 JWT_SECRET=$(openssl rand -base64 32)
 JWT_EXPIRATION_MS="86400000"  # 24 hours
-CORS_ALLOWED_ORIGIN_PATTERNS= "http://104.211.241.125"
+CORS_ALLOWED_ORIGIN_PATTERNS="http://104.211.241.125"
 
 
 # --- [0/10] Stop and disable existing services ---
