@@ -13,7 +13,8 @@ FLUTTER_FRONTEND_REPO="https://github.com/athricovil/AA.git"
 DB_NAME="ayurdb"
 DB_USER="ayuruser"
 DB_PASS="ayurpass"
-JWT_SECRET=$(openssl rand -base64 32)
+# JWT_SECRET=$(openssl rand -base64 32)
+JWT_SECRET="0BVrrTNJBB2+hHcx3yb+C8hGBl2HKALYEzx0CZpFbKSzyeSuaUwbgdU6JBcrwkvkPG0HagKrlf7dpRh+TKzVTQ=="
 JWT_EXPIRATION_MS="86400000"  # 24 hours
 CORS_ALLOWED_ORIGIN_PATTERNS="http://localhost:*,http://104.211.241.125"
 
