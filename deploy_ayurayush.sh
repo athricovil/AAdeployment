@@ -140,7 +140,7 @@ server {
     }
 
     location /api/ {
-        proxy_pass http://104.211.241.125:8080/api/;
+        proxy_pass http://localhost:8080/api/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection 'upgrade';
